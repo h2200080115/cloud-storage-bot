@@ -69,7 +69,7 @@ class DatabaseManager:
             # Users
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
-                    user_id INTEGER PRIMARY KEY,
+                    user_id BIGINT PRIMARY KEY,
                     username TEXT
                 );
             """)
@@ -78,7 +78,7 @@ class DatabaseManager:
             cur.execute(f"""
                 CREATE TABLE IF NOT EXISTS folders (
                     id {pk_type},
-                    user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
                     folder_name TEXT NOT NULL,
                     UNIQUE (user_id, folder_name)
                 );
@@ -88,7 +88,7 @@ class DatabaseManager:
             cur.execute(f"""
                 CREATE TABLE IF NOT EXISTS files (
                     id {pk_type},
-                    user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
+                    user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
                     folder_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
                     file_name TEXT NOT NULL,
                     file_id TEXT NOT NULL,
