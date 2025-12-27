@@ -2,8 +2,9 @@ import os
 import logging
 import re
 import sqlite3
+import uuid
 from html import escape as html_escape
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -27,6 +28,8 @@ if not DATABASE_URL:
 # Allow environment variables to override local config
 if os.getenv("BOT_TOKEN"):
     BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))  # Set this in env vars
 
 if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
     raise RuntimeError("Please set your BOT_TOKEN in the script or as an environment variable.")
@@ -80,6 +83,9 @@ class DatabaseManager:
                     id {pk_type},
                     user_id BIGINT REFERENCES users(user_id) ON DELETE CASCADE,
                     folder_name TEXT NOT NULL,
+                    share_token TEXT UNIQUE,
+                    pin_code TEXT,
+                    deleted_at TIMESTAMP,
                     UNIQUE (user_id, folder_name)
                 );
             """)
@@ -94,18 +100,31 @@ class DatabaseManager:
                     file_id TEXT NOT NULL,
                     file_type TEXT NOT NULL DEFAULT 'document',
                     file_size INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    tags TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    deleted_at TIMESTAMP
                 );
             """)
 
-            # Add file_size column if missing (safe migration)
-            try:
-                if self.is_postgres:
-                    cur.execute("ALTER TABLE files ADD COLUMN IF NOT EXISTS file_size INTEGER DEFAULT 0")
-                else:
-                    cur.execute("ALTER TABLE files ADD COLUMN file_size INTEGER DEFAULT 0")
-            except Exception:
-                pass
+            # --- Migrations (Add columns if missing) ---
+            migrations = [
+                ("folders", "share_token", "TEXT UNIQUE"),
+                ("folders", "pin_code", "TEXT"),
+                ("folders", "deleted_at", "TIMESTAMP"),
+                ("files", "file_size", "INTEGER DEFAULT 0"),
+                ("files", "tags", "TEXT"),
+                ("files", "deleted_at", "TIMESTAMP"),
+            ]
+
+            for table, col, type_def in migrations:
+                try:
+                    if self.is_postgres:
+                        cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {type_def}")
+                    else:
+                        # SQLite has no IF NOT EXISTS for columns, catch error
+                        cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {type_def}")
+                except Exception:
+                    pass
 
             conn.commit()
 
@@ -113,10 +132,15 @@ class DatabaseManager:
             indices = [
                 "CREATE INDEX IF NOT EXISTS idx_files_user_folder ON files(user_id, folder_id)",
                 "CREATE INDEX IF NOT EXISTS idx_files_folder ON files(folder_id)",
-                "CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at)"
+                "CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_folders_share ON folders(share_token)",
+                "CREATE INDEX IF NOT EXISTS idx_files_tags ON files(tags)"
             ]
             for idx in indices:
-                cur.execute(idx)
+                try:
+                    cur.execute(idx)
+                except Exception: 
+                    pass
 
             conn.commit()
             cur.close()
